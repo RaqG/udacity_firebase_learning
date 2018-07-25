@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Friendly Chat</string>
+    <string name="sign_out">Desconectar</string>
+    <string name="send_button_label">Enviar</string>
+    <string name="signed_in">Você está logado!</string>
+    <string name="signed_in_canceled">Login cancelado!</string>
+</resources>
