@@ -12,4 +12,6 @@ public class Constants {
     public static final int DEFAULT_MSG_LENGTH_LIMIT = 1000;
     public static final int AUTH_REQUEST_CODE = 101;
     public static final String CHILD_REFERENCE = "messages";
+    public static final int PHOTO_PICKER = 102;
+    public static final String FRIENDLY_MSG_LENGTH_KEY = "friendly_msg_length";
 }

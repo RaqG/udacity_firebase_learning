@@ -9,8 +9,8 @@ import android.widget.ImageView;
 import android.widget.TextView;
 
 import com.bumptech.glide.Glide;
-import com.google.firebase.udacity.friendlychat.model.FriendlyMessage;
 import com.google.firebase.udacity.friendlychat.R;
+import com.google.firebase.udacity.friendlychat.model.FriendlyMessage;
 
 import java.util.List;
 
@@ -25,9 +25,9 @@ public class MessageAdapter extends ArrayAdapter<FriendlyMessage> {
             convertView = ((Activity) getContext()).getLayoutInflater().inflate(R.layout.item_message, parent, false);
         }
 
-        ImageView photoImageView = (ImageView) convertView.findViewById(R.id.photoImageView);
-        TextView messageTextView = (TextView) convertView.findViewById(R.id.messageTextView);
-        TextView authorTextView = (TextView) convertView.findViewById(R.id.nameTextView);
+        ImageView photoImageView = convertView.findViewById(R.id.photoImageView);
+        TextView messageTextView = convertView.findViewById(R.id.messageTextView);
+        TextView authorTextView = convertView.findViewById(R.id.nameTextView);
 
         FriendlyMessage message = getItem(position);
 

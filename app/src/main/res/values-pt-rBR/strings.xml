@@ -5,4 +5,6 @@
     <string name="send_button_label">Enviar</string>
     <string name="signed_in">Você está logado!</string>
     <string name="signed_in_canceled">Login cancelado!</string>
+    <string name="failure">Falha:</string>
+    <string name="connection_failure_message">Erro! Você não está conectado.</string>
 </resources>

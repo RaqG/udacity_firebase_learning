@@ -16,9 +16,12 @@
 package com.google.firebase.udacity.friendlychat.ui.view;
 
 import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
+import android.support.design.widget.Snackbar;
+import android.support.design.widget.TextInputLayout;
 import android.support.v7.app.AppCompatActivity;
 import android.text.Editable;
 import android.text.InputFilter;
@@ -32,9 +35,11 @@ import android.widget.EditText;
 import android.widget.ImageButton;
 import android.widget.ListView;
 import android.widget.ProgressBar;
-import android.widget.Toast;
+import android.widget.RelativeLayout;
 
 import com.firebase.ui.auth.AuthUI;
+import com.google.android.gms.tasks.OnFailureListener;
+import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.firebase.auth.FirebaseAuth;
 import com.google.firebase.auth.FirebaseUser;
 import com.google.firebase.database.ChildEventListener;
@@ -42,6 +47,12 @@ import com.google.firebase.database.DataSnapshot;
 import com.google.firebase.database.DatabaseError;
 import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.remoteconfig.FirebaseRemoteConfig;
+import com.google.firebase.remoteconfig.FirebaseRemoteConfigSettings;
+import com.google.firebase.storage.FirebaseStorage;
+import com.google.firebase.storage.StorageReference;
+import com.google.firebase.storage.UploadTask;
+import com.google.firebase.udacity.friendlychat.BuildConfig;
 import com.google.firebase.udacity.friendlychat.R;
 import com.google.firebase.udacity.friendlychat.model.FriendlyMessage;
 import com.google.firebase.udacity.friendlychat.ui.adapter.MessageAdapter;
@@ -49,32 +60,45 @@ import com.google.firebase.udacity.friendlychat.util.Constants;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import butterknife.BindView;
 import butterknife.ButterKnife;
 
 import static com.google.firebase.udacity.friendlychat.util.Constants.ANONYMOUS;
+import static com.google.firebase.udacity.friendlychat.util.Constants.AUTH_REQUEST_CODE;
+import static com.google.firebase.udacity.friendlychat.util.Constants.DEFAULT_MSG_LENGTH_LIMIT;
+import static com.google.firebase.udacity.friendlychat.util.Constants.FRIENDLY_MSG_LENGTH_KEY;
+import static com.google.firebase.udacity.friendlychat.util.Constants.PHOTO_PICKER;
 
 public class MainActivity extends AppCompatActivity {
 
+    @BindView(R.id.relative_layout)
+    RelativeLayout content;
     @BindView(R.id.messageListView)
     ListView mMessageListView;
-    private MessageAdapter mMessageAdapter;
     @BindView(R.id.progressBar)
     ProgressBar mProgressBar;
     @BindView(R.id.photoPickerButton)
     ImageButton mPhotoPickerButton;
+    @BindView(R.id.textContainer)
+    TextInputLayout inputLayout;
     @BindView(R.id.messageEditText)
     EditText mMessageEditText;
     @BindView(R.id.sendButton)
     Button mSendButton;
 
     private String mUsername;
+    private MessageAdapter mMessageAdapter;
 
     private FirebaseDatabase database;
-    private DatabaseReference reference;
+    private DatabaseReference dbReference;
     private FirebaseAuth auth;
+    private FirebaseStorage storage;
+    private StorageReference storageReference;
+    private FirebaseRemoteConfig remoteConfig;
 
     private ChildEventListener eventListener;
     private FirebaseAuth.AuthStateListener stateListener;
@@ -88,12 +112,7 @@ public class MainActivity extends AppCompatActivity {
         init();
 
         // ImagePickerButton shows an image picker to upload a image for a message
-        mPhotoPickerButton.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View view) {
-                // TODO: Fire an intent to show an image picker
-            }
-        });
+        mPhotoPickerButton.setOnClickListener(onPhotoButtonClicked());
 
         // Enable Send button when there's text to send
         mMessageEditText.addTextChangedListener(onChangeText());
@@ -103,6 +122,19 @@ public class MainActivity extends AppCompatActivity {
         mSendButton.setOnClickListener(clickOnSendButton());
 
         stateListener = initStateListener();
+    }
+
+    private View.OnClickListener onPhotoButtonClicked() {
+        return new View.OnClickListener() {
+            @Override
+            public void onClick(View view) {
+                Intent it = new Intent(Intent.ACTION_GET_CONTENT);
+                it.setType("image/jpeg");
+                it.putExtra(Intent.EXTRA_LOCAL_ONLY, true);
+                startActivityForResult(Intent.createChooser(it, "Complete action using"),
+                        Constants.PHOTO_PICKER);
+            }
+        };
     }
 
 
@@ -121,7 +153,51 @@ public class MainActivity extends AppCompatActivity {
     private void initFirebase() {
         database = FirebaseDatabase.getInstance();
         auth = FirebaseAuth.getInstance();
-        reference = database.getReference().child(Constants.CHILD_REFERENCE);
+        storage = FirebaseStorage.getInstance();
+        dbReference = database.getReference().child(Constants.CHILD_REFERENCE);
+        storageReference = storage.getReference().child("chat_photos");
+        remoteConfig = FirebaseRemoteConfig.getInstance();
+        configFirebaseRemoteConfig();
+    }
+
+    private void configFirebaseRemoteConfig() {
+        FirebaseRemoteConfigSettings settings = new FirebaseRemoteConfigSettings.Builder()
+                .setDeveloperModeEnabled(BuildConfig.DEBUG)
+                .build();
+        remoteConfig.setConfigSettings(settings);
+
+        Map<String, Object> defaultConfigMap = new HashMap<>();
+        defaultConfigMap.put(Constants.FRIENDLY_MSG_LENGTH_KEY, DEFAULT_MSG_LENGTH_LIMIT);
+        remoteConfig.setDefaults(defaultConfigMap);
+        fetchConfig();
+    }
+
+    private void fetchConfig() {
+        long cacheExpiration = 3600;
+
+        if (remoteConfig.getInfo().getConfigSettings().isDeveloperModeEnabled()) {
+            cacheExpiration = 0;
+        }
+        remoteConfig.fetch(cacheExpiration)
+                .addOnSuccessListener(new OnSuccessListener<Void>() {
+                    @Override
+                    public void onSuccess(Void aVoid) {
+                        remoteConfig.activateFetched();
+                        applyRetrievedLengthLimit();
+                    }
+                })
+                .addOnFailureListener(new OnFailureListener() {
+                    @Override
+                    public void onFailure(@NonNull Exception e) {
+                        Snackbar.make(content, R.string.connection_failure_message, Snackbar.LENGTH_LONG).show();
+                    }
+                });
+    }
+
+    private void applyRetrievedLengthLimit() {
+        Long friendly_msg_length = remoteConfig.getLong(FRIENDLY_MSG_LENGTH_KEY);
+        mMessageEditText.setFilters(new InputFilter[]{new InputFilter.LengthFilter(friendly_msg_length.intValue())});
+        inputLayout.setCounterMaxLength(friendly_msg_length.intValue());
     }
 
     private TextWatcher onChangeText() {
@@ -149,9 +225,8 @@ public class MainActivity extends AppCompatActivity {
         return new View.OnClickListener() {
             @Override
             public void onClick(View view) {
-                // TODO: Send messages on click
                 FriendlyMessage friendlyMessage = new FriendlyMessage(mMessageEditText.getText().toString(), mUsername, null);
-                reference.push().setValue(friendlyMessage);
+                dbReference.push().setValue(friendlyMessage);
                 // Clear input box
                 mMessageEditText.setText("");
             }
@@ -201,8 +276,9 @@ public class MainActivity extends AppCompatActivity {
                                             Arrays.asList(
                                                     new AuthUI.IdpConfig.EmailBuilder().build(),
                                                     new AuthUI.IdpConfig.GoogleBuilder().build()
-                                            )
-                                    ).build(), Constants.AUTH_REQUEST_CODE
+                                            ))
+                                    .build(),
+                            Constants.AUTH_REQUEST_CODE
                     );
                 }
             }
@@ -223,13 +299,13 @@ public class MainActivity extends AppCompatActivity {
     private void attachDatabaseReadListener() {
         if (eventListener == null) {
             eventListener = initEventListener();
-            reference.addChildEventListener(eventListener);
+            dbReference.addChildEventListener(eventListener);
         }
     }
 
     private void detachDatabaseReadListener() {
         if (eventListener != null) {
-            reference.removeEventListener(eventListener);
+            dbReference.removeEventListener(eventListener);
             eventListener = null;
         }
     }
@@ -237,14 +313,47 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if (requestCode == Constants.AUTH_REQUEST_CODE) {
-            if (resultCode == RESULT_OK) {
-                Toast.makeText(this, R.string.signed_in, Toast.LENGTH_SHORT).show();
-            } else if (resultCode == RESULT_CANCELED) {
-                Toast.makeText(this, R.string.signed_in_canceled, Toast.LENGTH_SHORT).show();
-                finish();
-            }
+        switch (requestCode) {
+            case AUTH_REQUEST_CODE:
+                if (resultCode == RESULT_OK) {
+                    Snackbar.make(content, R.string.signed_in, Snackbar.LENGTH_LONG).show();
+                } else if (resultCode == RESULT_CANCELED) {
+                    Snackbar.make(content, R.string.signed_in_canceled, Snackbar.LENGTH_LONG).show();
+                    finish();
+                }
+                break;
+            case PHOTO_PICKER:
+                if (resultCode == RESULT_OK) {
+                    Uri selectedImage = data.getData();
+                    StorageReference photoRef = storageReference.child(selectedImage.getLastPathSegment());
+                    UploadTask uploadTask = photoRef.putFile(selectedImage);
+                    uploadPhotoToStorage(uploadTask, photoRef);
+                }
+                break;
         }
+    }
+
+    private void uploadPhotoToStorage(UploadTask uploadTask, final StorageReference photoRef) {
+        uploadTask
+                .addOnFailureListener(new OnFailureListener() {
+                    @Override
+                    public void onFailure(@NonNull Exception e) {
+                        Snackbar.make(content, R.string.failure + e.getMessage(), Snackbar.LENGTH_LONG).show();
+                    }
+                })
+                .addOnSuccessListener(new OnSuccessListener<UploadTask.TaskSnapshot>() {
+                    @Override
+                    public void onSuccess(UploadTask.TaskSnapshot taskSnapshot) {
+                        photoRef.getDownloadUrl().addOnSuccessListener(new OnSuccessListener<Uri>() {
+                            @Override
+                            public void onSuccess(Uri uri) {
+                                String imagePath = uri.toString();
+                                FriendlyMessage message = new FriendlyMessage(null, mUsername, imagePath);
+                                dbReference.push().setValue(message);
+                            }
+                        });
+                    }
+                });
     }
 
     @Override
